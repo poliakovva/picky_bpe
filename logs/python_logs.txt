@@ -1,0 +1,6 @@
+Total time: 546.7796227931976
+Removed 34 tokens
+Finished running Python PickyBPE on 184MB dataset with vocab_size=1000
+Total time: 21939.7785282135
+Removed 643 tokens
+Finished running Python PickyBPE on 670MB dataset with vocab_size=10000

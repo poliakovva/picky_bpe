@@ -1,0 +1,15 @@
+
+
+
+Total time: 22.18s
+Finished running HF_BPE on 184MB dataset with vocab_size=1000
+
+
+
+Total time: 81.75s
+Finished running HF_BPE on 670MB dataset with vocab_size=10000
+
+
+
+Total time: 70.43s
+Finished running HF_BPE on 670MB dataset with vocab_size=30000
