@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use tokenizers::decoders::DecoderWrapper;
-use tokenizers::models::bpe::{BpeTrainer, BPE};
+use tokenizers::models::pbpe::{PbpeTrainer, PBPE};
 use tokenizers::normalizers::{strip::Strip, unicode::NFC, utils::Sequence, NormalizerWrapper};
 use tokenizers::parallelism;
 use tokenizers::parallelism::get_parallelism;
@@ -62,7 +62,7 @@ fn main() -> Result<()> {
     let files = filter_utf8_txt_files(&dir_path).unwrap();
     // let files = vec![dir_path];
 
-    let mut trainer = BpeTrainer::builder()
+    let mut trainer = PbpeTrainer::builder()
     .vocab_size(vocab_size)
     .special_tokens(vec![
         AddedToken::from("[UNK]", true),
@@ -71,18 +71,18 @@ fn main() -> Result<()> {
         AddedToken::from("[PAD]", true),
     ])
     .show_progress(true)
-    .tau(Some(0.7))
+    .tau(Some(0.3))
     .build();
 
 
     let mut tokenizer: TokenizerImpl<
-        BPE,
+        PBPE,
         NormalizerWrapper,
         PreTokenizerWrapper,
         PostProcessorWrapper,
         DecoderWrapper,
     > = TokenizerImpl::new(
-        BPE::builder()
+        PBPE::builder()
             .unk_token("[UNK]".to_string())
             .build()
             .unwrap(),
@@ -104,7 +104,9 @@ fn main() -> Result<()> {
     set_parallelism(true);
     tokenizer
         .train_from_files(&mut trainer, files)?;
+    tokenizer.save("toy_tokenizer.json", pretty)?;
     let elapsed = now.elapsed();
     println!("Total time: {:.2?}", elapsed);
+    
     Ok(())
 }

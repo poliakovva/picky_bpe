@@ -1,12 +1,20 @@
 #![allow(clippy::map_entry)]
 
-use super::{Pair, WithFirstLastIterator, Word, BPE};
+use super::{Pair, WithFirstLastIterator, Word, PBPE};
 use crate::parallelism::*;
 use crate::tokenizer::{AddedToken, Result, Trainer};
 use crate::utils::progress::{ProgressBar, ProgressStyle};
+use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::process::id;
+use std::sync::atomic;
+
+enum EventType {
+    Merge = 0,
+    Split = 1,
+}
 
 #[derive(Debug, Eq)]
 struct Merge {
@@ -45,15 +53,16 @@ struct Config {
     continuing_subword_prefix: Option<String>,
     end_of_word_suffix: Option<String>,
     max_token_length: Option<usize>,
+    tau: Option<f64>,
 }
 
-/// A `BpeTrainerBuilder` can be used to create a `BpeTrainer` with a custom
+/// A `PbpeTrainerBuilder` can be used to create a `PbpeTrainer` with a custom
 /// configuration.
-pub struct BpeTrainerBuilder {
+pub struct PbpeTrainerBuilder {
     config: Config,
 }
 
-impl Default for BpeTrainerBuilder {
+impl Default for PbpeTrainerBuilder {
     fn default() -> Self {
         Self {
             config: Config {
@@ -66,13 +75,14 @@ impl Default for BpeTrainerBuilder {
                 continuing_subword_prefix: None,
                 end_of_word_suffix: None,
                 max_token_length: None,
+                tau: Some(1f64),
             },
         }
     }
 }
 
-impl BpeTrainerBuilder {
-    /// Constructs a new `BpeTrainerBuilder`
+impl PbpeTrainerBuilder {
+    /// Constructs a new `PbpeTrainerBuilder`
     pub fn new() -> Self {
         Self::default()
     }
@@ -138,10 +148,16 @@ impl BpeTrainerBuilder {
         self.config.max_token_length = max_token_length;
         self
     }
+    /// Set tau
+    #[must_use]
+    pub fn tau(mut self, tau: Option<f64>) -> Self {
+        self.config.tau = tau;
+        self
+    }
 
-    /// Constructs the final BpeTrainer
-    pub fn build(self) -> BpeTrainer {
-        BpeTrainer {
+    /// Constructs the final PbpeTrainer
+    pub fn build(self) -> PbpeTrainer {
+        PbpeTrainer {
             min_frequency: self.config.min_frequency,
             vocab_size: self.config.vocab_size,
             show_progress: self.config.show_progress,
@@ -151,30 +167,31 @@ impl BpeTrainerBuilder {
             continuing_subword_prefix: self.config.continuing_subword_prefix,
             end_of_word_suffix: self.config.end_of_word_suffix,
             max_token_length: self.config.max_token_length,
+            tau: self.config.tau,
             words: HashMap::new(),
         }
     }
 }
 
-/// In charge of training a `BPE` model
+/// In charge of training a `PBPE` model
 ///
 /// # Examples
 ///
 /// ```
 /// use tokenizers::tokenizer::Trainer;
-/// use tokenizers::models::bpe::{BPE, BpeTrainer};
+/// use tokenizers::models::pbpe::{PBPE, PbpeTrainer};
 ///
 /// let sequences = vec![ "Hello", "World" ];
 ///
-/// let mut trainer = BpeTrainer::default();
+/// let mut trainer = PbpeTrainer::default();
 /// trainer.feed(sequences.iter(), |s| Ok(vec![s.to_owned()]));
 ///
-/// let mut model = BPE::default();
+/// let mut model = PBPE::default();
 /// let special_tokens = trainer.train(&mut model).unwrap();
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
-pub struct BpeTrainer {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PbpeTrainer {
     /// The minimum frequency a pair must have to produce a merge operation
     pub min_frequency: u64,
     /// The target vocabulary size
@@ -195,16 +212,18 @@ pub struct BpeTrainer {
     /// An optional parameter to limit the max length of any single token
     pub max_token_length: Option<usize>,
 
+    pub tau: Option<f64>,
+
     words: HashMap<String, u64>,
 }
 
-impl Default for BpeTrainer {
+impl Default for PbpeTrainer {
     fn default() -> Self {
         Self::builder().build()
     }
 }
 
-impl BpeTrainer {
+impl PbpeTrainer {
     pub fn new(min_frequency: u64, vocab_size: usize) -> Self {
         Self {
             min_frequency,
@@ -213,8 +232,8 @@ impl BpeTrainer {
         }
     }
 
-    pub fn builder() -> BpeTrainerBuilder {
-        BpeTrainerBuilder::new()
+    pub fn builder() -> PbpeTrainerBuilder {
+        PbpeTrainerBuilder::new()
     }
 
     /// Setup a progress bar if asked to show progress
@@ -429,14 +448,40 @@ impl BpeTrainer {
             )
     }
 
+    pub fn split(
+        token_id: u32,
+        parents: &Vec<Pair>,
+        id_active: &Vec<u8>,
+        atomic_size: u32,
+    ) -> Vec<usize> {
+        if (token_id < atomic_size) || (id_active[(token_id - atomic_size) as usize] == 1) {
+            vec![token_id as usize]
+        } else {
+            let (token1, token2) = parents[(token_id - atomic_size) as usize];
+            [
+                Self::split(token1, &parents, &id_active, atomic_size),
+                Self::split(token2, &parents, &id_active, atomic_size),
+            ]
+            .concat()
+        }
+    }
+
     pub fn do_train(
         &self,
         word_counts: &HashMap<String, u64>,
-        model: &mut BPE,
+        model: &mut PBPE,
     ) -> Result<Vec<AddedToken>> {
+        // println!("Tau: {}", self.tau.unwrap());
+        // println!("vocab_size: {}", self.vocab_size);
         let mut word_to_id: HashMap<String, u32> = HashMap::with_capacity(self.vocab_size);
         let mut id_to_word: Vec<String> = Vec::with_capacity(self.vocab_size);
+        //vec that has 1 is token is active or 0 if not
+        let mut id_active: Vec<u8> = Vec::new();
+        //vec of parents
+        let mut parents: Vec<Pair> = Vec::with_capacity(self.vocab_size);
+
         let max_token_length: usize = self.max_token_length.unwrap_or(usize::MAX);
+        let mut actual_vocab_size: usize;
 
         let progress = self.setup_progress();
 
@@ -449,7 +494,6 @@ impl BpeTrainer {
         // 2. Compute the initial alphabet
         //
         self.compute_alphabet(word_counts, &mut word_to_id, &mut id_to_word);
-
         //
         // 3. Tokenize words
         //
@@ -458,6 +502,21 @@ impl BpeTrainer {
             self.tokenize_words(word_counts, &mut word_to_id, &mut id_to_word, &progress);
         self.finalize_progress(&progress, words.len());
 
+        actual_vocab_size = id_to_word.len();
+        let atomic_size = actual_vocab_size as u32;
+        println!(
+            "Initialized vocabulary with: {} unique characters",
+            atomic_size
+        );
+        println!("Number of unique words:{}", word_counts.len());
+        let mut sorted_words: Vec<(String, u32)> = word_to_id.clone().into_iter().collect();
+        sorted_words.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Print the sorted results
+        for (word, id) in sorted_words {
+            println!("Word: |{:?}| ID: {}", word, id);
+        }
+
         //
         // 4. Count pairs in words
         //
@@ -465,6 +524,7 @@ impl BpeTrainer {
         let (mut pair_counts, mut where_to_update) = self.count_pairs(&words, &counts, &progress);
         // Insert them in the queue
         let mut queue = BinaryHeap::with_capacity(pair_counts.len());
+
         where_to_update.drain().for_each(|(pair, pos)| {
             let count = pair_counts[&pair];
             if count > 0 {
@@ -475,32 +535,45 @@ impl BpeTrainer {
                 });
             }
         });
+
         self.finalize_progress(&progress, words.len());
 
         //
-        // 5. Do merges
+        // 5. Do merges and splits
         //
-        self.update_progress(&progress, self.vocab_size, "Compute merges");
+        let mut count_merged_tokens: HashMap<u32, i32> = HashMap::with_capacity(pair_counts.len()); /////// -------------
+        self.update_progress(&progress, self.vocab_size, "Compute events");
         let mut merges: Vec<(Pair, u32)> = vec![];
+        let mut events: Vec<(EventType, usize)> = vec![];
+        let mut splits: Vec<(u32, Vec<usize>)> = vec![];
+        let mut removes_counter = 0;
+
         loop {
             // Stop as soon as we have a big enough vocabulary
-            if word_to_id.len() >= self.vocab_size {
+            if actual_vocab_size >= self.vocab_size {
                 break;
             }
 
             if queue.is_empty() {
                 break;
             }
-
             let mut top = queue.pop().unwrap();
             if top.count != pair_counts[&top.pair] as u64 {
                 top.count = pair_counts[&top.pair] as u64;
-                queue.push(top);
+                if top.count > 0 {
+                    queue.push(top);
+                }
                 continue;
             }
 
-            if top.count < 1 || self.min_frequency > top.count {
-                break;
+            if top.count < 1
+                || self.min_frequency > top.count
+                || (top.pair.0 >= atomic_size
+                    && id_active[(top.pair.0 - atomic_size) as usize] == 0)
+                || (top.pair.1 >= atomic_size
+                    && id_active[(top.pair.1 - atomic_size) as usize] == 0)
+            {
+                continue;
             }
 
             let part_a = &id_to_word[top.pair.0 as usize];
@@ -526,13 +599,28 @@ impl BpeTrainer {
             if !word_to_id.contains_key(&new_token) {
                 id_to_word.push(new_token.clone());
                 word_to_id.insert(new_token.clone(), new_token_id);
+                parents.push(top.pair);
+                id_active.push(1);
+            } else {
+                id_active[(new_token_id - atomic_size) as usize] = 1;
             }
+            actual_vocab_size += 1;
+
             merges.push((top.pair, new_token_id));
+            events.push((EventType::Merge, merges.len() - 1));
+            count_merged_tokens
+                .entry(new_token_id)
+                .and_modify(|c| *c += pair_counts[&top.pair]) //??
+                .or_insert(pair_counts[&top.pair]);
 
             // Merge the new pair in every words
             // Safety: This is just a type assertion, the code below may no longer be safe
             // if the type of `pos` changes
             let pos: &HashSet<usize> = &top.pos;
+            // println!(
+            //     "merged tokens: '{}' with token '{}'| count: {}",
+            //     id_to_word[top.pair.0 as usize], id_to_word[top.pair.1 as usize], top.count
+            // );
 
             let words_len = words.len();
             struct WordPtr(*mut Word);
@@ -541,7 +629,7 @@ impl BpeTrainer {
             unsafe impl Sync for WordPtr {}
             let word_start = WordPtr(words.as_mut_ptr());
 
-            let changes = pos
+            let mut changes = pos
                 .maybe_par_iter()
                 .flat_map(|&i| {
                     // Safety:
@@ -562,7 +650,115 @@ impl BpeTrainer {
                     }
                 })
                 .collect::<Vec<_>>();
+            //check IOS metric for token1 and token2.
+            //then remove the x from vocab and add new event to merges
+            if let Some(&count_1) = count_merged_tokens.get(&top.pair.0) {
+                //update count on merge
+                count_merged_tokens
+                    .entry(top.pair.0)
+                    .and_modify(|c| *c -= pair_counts[&top.pair]);
+                // println!("TOKEN TO REMOVE: {:#?}, IoS: {}", id_to_word[top.pair.0 as usize], (top.count as f64)/f64::from(count_1));
 
+                if (top.count as f64) / f64::from(count_1) >= self.tau.unwrap()
+                    && (top.pair.0 >= atomic_size)
+                {
+                    // println!(
+                    //     "removed token: {:#?} with freq: {}, merged to {} with freq:{}",
+                    //     id_to_word[top.pair.0 as usize],
+                    //     f64::from(count_1),
+                    //     new_token,
+                    //     (top.count as f64)
+                    // );
+
+                    removes_counter += 1;
+                    // println!("REMOVED: {:#?}", &top.pair.0);
+
+                    id_active[(top.pair.0 - atomic_size) as usize] = 0;
+                    //split token
+                    let split_token = Self::split(top.pair.0, &parents, &id_active, atomic_size);
+                    //add event
+                    splits.push((top.pair.0, split_token.clone()));
+                    events.push((EventType::Split, splits.len() - 1));
+
+                    //clean the corpus x_1
+                    let mut changes_token1 = words
+                        .maybe_par_iter_mut()
+                        .enumerate()
+                        .map(|(i, word)| {
+                            (*word)
+                                .remove(top.pair.0, &split_token, max_token_length)
+                                .into_iter()
+                                .map(|c| (c, i))
+                                .collect::<Vec<_>>()
+                        })
+                        .flatten()
+                        .collect::<Vec<_>>();
+                    changes.append(&mut changes_token1);
+                    actual_vocab_size -= 1;
+                    //update count on remove
+                    for token in split_token {
+                        if let Some(value) = count_merged_tokens.get_mut(&(token as u32)) {
+                            *value -= top.count as i32;
+                        }
+                    }
+                }
+            }
+            if top.pair.1 != top.pair.0 {
+                if let Some(&count_2) = count_merged_tokens.get(&top.pair.1) {
+                    // println!("SEEN: {:#?}", &top.pair.1);
+                    // println!("TOKEN TO REMOVE: {:#?}, IoS: {}", id_to_word[top.pair.1 as usize], (top.count as f64)/f64::from(count_2));
+                    // println!("SELF.TAU: {:#?}", self.tau.unwrap());
+                    // println!("atomic_size: {:#?}", atomic_size);
+
+                    //update count on merge
+                    count_merged_tokens
+                        .entry(top.pair.1)
+                        .and_modify(|c| *c -= pair_counts[&top.pair]);
+
+                    if (top.count as f64) / f64::from(count_2) >= self.tau.unwrap()
+                        && (top.pair.1 >= atomic_size)
+                    {
+                        // println!("REMOVED: {:#?}", &top.pair.1);
+                        // println!(
+                        //     "removed token: {:#?} with freq: {}, merged to {} with freq:{}",
+                        //     id_to_word[top.pair.1 as usize],
+                        //     f64::from(count_2),
+                        //     new_token,
+                        //     (top.count as f64)
+                        // );
+
+                        removes_counter += 1;
+                        id_active[(top.pair.1 - atomic_size) as usize] = 0;
+                        //split token
+                        let split_token =
+                            Self::split(top.pair.1, &parents, &id_active, atomic_size);
+                        //add event
+                        splits.push((top.pair.1, split_token.clone()));
+                        events.push((EventType::Split, splits.len() - 1));
+                        //clean the corpus x_1
+                        let mut changes_token2 = words
+                            .maybe_par_iter_mut()
+                            .enumerate()
+                            .map(|(i, word)| {
+                                (*word)
+                                    .remove(top.pair.1, &split_token, max_token_length)
+                                    .into_iter()
+                                    .map(|c| (c, i))
+                                    .collect::<Vec<_>>()
+                            })
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        changes.append(&mut changes_token2);
+                        actual_vocab_size -= 1;
+                        //update counts on remove
+                        for token in split_token {
+                            if let Some(value) = count_merged_tokens.get_mut(&(token as u32)) {
+                                *value -= top.count as i32;
+                            }
+                        }
+                    }
+                }
+            }
             // Introduce new formed pairs
             for ((pair, change), iw) in changes {
                 let count = change * counts[iw] as i32;
@@ -570,6 +766,8 @@ impl BpeTrainer {
                     .entry(pair)
                     .and_modify(|c| *c += count)
                     .or_insert(count);
+
+                //modify token_counts
                 if change > 0 {
                     where_to_update
                         .entry(pair)
@@ -598,20 +796,45 @@ impl BpeTrainer {
                 p.inc(1);
             }
         }
-        self.finalize_progress(&progress, merges.len());
+        self.finalize_progress(&progress, events.len());
 
-        // Transfer new vocab & options to model
+        println!("Removed {} tokens", removes_counter);
+
+        let mut merges_map: HashMap<Pair, Vec<(u32, u32)>> = HashMap::new();
+        let mut splits_map: HashMap<u32, Vec<(u32, Vec<u32>)>> = HashMap::new();
+
+        for (event_id, (event_type, index)) in events.iter().enumerate() {
+            match event_type {
+                EventType::Merge => {
+                    let (pair, new_id) = &merges[*index];
+                    merges_map
+                        .entry(*pair)
+                        .or_insert_with(Vec::new)
+                        .push((event_id as u32, *new_id));
+                }
+                EventType::Split => {
+                    let (token_id, split_tokens) = &splits[*index];
+                    splits_map
+                        .entry(token_id.clone())
+                        .or_insert_with(Vec::new)
+                        .push((
+                            event_id as u32,
+                            split_tokens.iter().map(|&i| i as u32).collect(),
+                        ));
+                }
+            }
+        }
+
+        // Transfer new vocab & options to mode
         model.vocab = word_to_id;
+
         model.vocab_r = model
             .vocab
             .iter()
             .map(|(key, val)| (*val, key.to_owned()))
             .collect();
-        model.merges = merges
-            .into_iter()
-            .enumerate()
-            .map(|(i, (pair, new_token_id))| (pair, (i as u32, new_token_id)))
-            .collect();
+        model.merges = merges_map;
+        model.splits = splits_map;
 
         if let Some(prefix) = &self.continuing_subword_prefix {
             model.continuing_subword_prefix = Some(prefix.to_owned());
@@ -628,11 +851,11 @@ impl BpeTrainer {
     }
 }
 
-impl Trainer for BpeTrainer {
-    type Model = BPE;
+impl Trainer for PbpeTrainer {
+    type Model = PBPE;
 
-    /// Train a BPE model
-    fn train(&self, model: &mut BPE) -> Result<Vec<AddedToken>> {
+    /// Train a PBPE model
+    fn train(&self, model: &mut PBPE) -> Result<Vec<AddedToken>> {
         self.do_train(&self.words, model)
     }
 
@@ -675,14 +898,16 @@ impl Trainer for BpeTrainer {
 
 #[cfg(test)]
 mod tests {
-    use super::{BpeTrainer, Pair, BPE};
+    use crate::models::pbpe::Word;
+
+    use super::{Pair, PbpeTrainer, PBPE};
     use std::collections::HashMap;
 
     #[test]
     fn test_train() {
         let word_counts: HashMap<String, u64> = [
             ("roses".into(), 1),
-            ("are".into(), 2),
+            ("are".into(), 15),
             ("red".into(), 1),
             ("voilets".into(), 1),
             ("blue".into(), 1),
@@ -696,11 +921,12 @@ mod tests {
         .iter()
         .cloned()
         .collect();
-        let trainer = BpeTrainer::builder()
+        let trainer = PbpeTrainer::builder()
             .show_progress(false)
+            .tau(Some(0.3))
             .min_frequency(2)
             .build();
-        let mut model = BPE::default();
+        let mut model = PBPE::default();
         trainer.do_train(&word_counts, &mut model).unwrap();
 
         // Vocab should contain all of the characters from the `word_counts` mapping
@@ -728,7 +954,6 @@ mod tests {
             ("t".into(), 19),
             ("u".into(), 20),
             ("v".into(), 21),
-            ("re".into(), 22),
             ("are".into(), 23),
             ("is".into(), 24),
         ]
@@ -741,15 +966,66 @@ mod tests {
         // where 'rank' determines the order in which this merge will be applied during
         // tokenization, and 'id' is the vocab id of the symbol resulting from merging
         // the pair of symbols in the corresponding key.
-        let expected_merges: HashMap<Pair, (u32, u32)> = [
-            ((17, 11), (0, 22)), // 'r' + 'e'  -> 're'
-            ((8, 22), (1, 23)),  // 'a' + 're' -> 'are'
-            ((13, 18), (2, 24)), // 'i' + 's'  -> 'is'
+        let expected_merges: HashMap<Pair, Vec<(u32, u32)>> = [
+            ((17, 11), vec![(0, 22)]), // 'r' + 'e'  -> 're'
+            ((8, 22), vec![(1, 23)]),  // 'a' + 're' -> 'are'
+            ((13, 18), vec![(2, 24)]), // 'i' + 's'  -> 'is'
         ]
         .iter()
         .cloned()
         .collect();
         assert_eq!(model.merges, expected_merges);
+    }
+
+    #[test]
+    fn test_merge_multiple_pairs() {
+        // Let's use the word 'mississippi' and a word-to-id vocab:
+        // {'m': 0, 'i': 1, 's': 2, 'p': 3}.
+        let mut word = Word::new();
+        word.add(0, 1); // 'm'
+        word.add(1, 1); // 'i'
+        word.add(2, 1); // 's'
+        word.add(2, 1); // 's'
+        word.add(1, 1); // 'i'
+        word.add(2, 1); // 's'
+        word.add(2, 1); // 's'
+        word.add(1, 1); // 'i'
+        word.add(3, 1); // 'p'
+        word.add(3, 1); // 'p'
+        word.add(1, 1); // 'i'
+
+        // First merge the pair ('s', 's') ~= (2, 2), new ID is 4.
+        let _ = word.merge(2, 2, 4, usize::MAX);
+
+        // Then merge the pair ('p', 'p') ~= (3, 3), new ID is 5.
+        let changes = word.merge(3, 3, 5, usize::MAX);
+
+        // The word should now look like this:
+        assert_eq!(
+            word.get_chars(),
+            &[
+                0u32, // 'm'
+                1u32, // 'i'
+                4u32, // 'ss'
+                1u32, // 'i'
+                4u32, // 'ss'
+                1u32, // 'i'
+                5u32, // 'pp'
+                1u32, // 'i'
+            ]
+        );
+
+        // Check changes in pair counts after the second merge:
+        assert_eq!(
+            changes,
+            &[
+                ((3u32, 3u32), -1i32), // count for ('p', 'p') decreased.
+                ((1u32, 3u32), -1i32), // count for ('i', 'p') decreased.
+                ((1u32, 5u32), 1i32),  // count for ('i', 'pp') increased.
+                ((3u32, 1u32), -1i32), // count for ('o', 'i') decreased.
+                ((5u32, 1u32), 1i32),  // count for ('pp', 'i') increased.
+            ]
+        );
     }
 
     #[test]
@@ -777,12 +1053,12 @@ mod tests {
         .iter()
         .map(|(key, value)| (key.to_string(), *value))
         .collect();
-        let trainer = BpeTrainer::builder()
+        let trainer = PbpeTrainer::builder()
             .max_token_length(Some(max_token_length))
             .show_progress(false)
             .min_frequency(0)
             .build();
-        let mut model = BPE::default();
+        let mut model = PBPE::default();
         trainer.do_train(&long_word_counts, &mut model).unwrap();
         let vocab = model.get_vocab();
         for token in vocab.keys() {
@@ -817,12 +1093,12 @@ mod tests {
         .iter()
         .map(|(key, value)| (key.to_string(), *value))
         .collect();
-        let trainer = BpeTrainer::builder()
+        let trainer = PbpeTrainer::builder()
             .max_token_length(Some(2))
             .show_progress(false)
             .min_frequency(0)
             .build();
-        let mut model = BPE::default();
+        let mut model = PBPE::default();
         trainer.do_train(&long_word_counts, &mut model).unwrap();
         let trained_vocab: HashMap<String, u32> = model.get_vocab();
         let expected_vocab: HashMap<String, u32> = [
@@ -862,5 +1138,13 @@ mod tests {
         .map(|(k, v)| (k.to_string(), v))
         .collect();
         assert_eq!(trained_vocab, expected_vocab)
+    }
+    #[test]
+    fn test_split() {
+        let parents = vec![(2u32, 2u32), (0u32, 1u32), (1u32, 4u32)];
+        let id_active = vec![1, 1, 1, 1, 0, 1, 0];
+        let atomic_size = 4;
+        let split_token = PbpeTrainer::split(6, &parents, &id_active, atomic_size);
+        assert_eq!(split_token, vec![1, 2, 2]);
     }
 }
