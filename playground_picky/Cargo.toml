@@ -1,9 +1,0 @@
-[package]
-name = "playground_picky"
-version = "0.1.0"
-edition = "2018"
-
-[dependencies]
-pbpe_tokenizer = {version = "0.1.0", path = "../tokenizers"}
-clap = { version = "4.0", features = ["derive"] } 
-

@@ -7,7 +7,8 @@ use crate::utils::progress::{ProgressBar, ProgressStyle};
 use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::collections::{HashMap, HashSet};
 use std::process::id;
 use std::sync::atomic;
 
@@ -16,17 +17,17 @@ enum EventType {
     Split = 1,
 }
 
-#[derive(Debug, Eq)]
+#[derive(Debug)]
 struct Merge {
     pair: Pair,
-    count: u64,
-    pos: HashSet<usize>,
+    pos: Vec<usize>,
 }
 impl PartialEq for Merge {
     fn eq(&self, other: &Self) -> bool {
-        self.count == other.count && self.pair == other.pair
+        self.pair == other.pair
     }
 }
+impl Eq for Merge {}
 impl PartialOrd for Merge {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -34,12 +35,12 @@ impl PartialOrd for Merge {
 }
 impl Ord for Merge {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.count != other.count {
-            self.count.cmp(&other.count)
-        } else {
-            // Here we want ascending order
-            other.pair.cmp(&self.pair)
-        }
+        other.pair.cmp(&self.pair)
+    }
+}
+impl Hash for Merge {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.pair.hash(state);
     }
 }
 
@@ -523,16 +524,18 @@ impl PbpeTrainer {
         self.update_progress(&progress, words.len(), "Count pairs");
         let (mut pair_counts, mut where_to_update) = self.count_pairs(&words, &counts, &progress);
         // Insert them in the queue
-        let mut queue = BinaryHeap::with_capacity(pair_counts.len());
+        let mut queue = PriorityQueue::with_capacity(pair_counts.len());
 
         where_to_update.drain().for_each(|(pair, pos)| {
             let count = pair_counts[&pair];
             if count > 0 {
-                queue.push(Merge {
-                    pair,
-                    count: count as u64,
-                    pos,
-                });
+                queue.push(
+                    Merge {
+                        pair,
+                        pos: pos.into_iter().collect::<Vec<_>>(),
+                    },
+                    count,
+                );
             }
         });
 
@@ -557,17 +560,21 @@ impl PbpeTrainer {
             if queue.is_empty() {
                 break;
             }
-            let mut top = queue.pop().unwrap();
-            if top.count != pair_counts[&top.pair] as u64 {
-                top.count = pair_counts[&top.pair] as u64;
-                if top.count > 0 {
-                    queue.push(top);
-                }
-                continue;
-            }
+            let top = queue.pop().unwrap();
+            let mut priority = top.1;
+            let top = top.0;
+            // println!("priority: {}", priority);
+            // println!("pair_counts: {}", pair_counts[&top.pair]);
+            // if priority != pair_counts[&top.pair] {
+            //     priority = pair_counts[&top.pair];
+            //     if priority > 0 {
+            //         queue.push(top, priority);// expect
+            //     }
+            //     continue;
+            // }
 
-            if top.count < 1
-                || self.min_frequency > top.count
+            if priority < 1
+                || self.min_frequency > priority as u64
                 || (top.pair.0 >= atomic_size
                     && id_active[(top.pair.0 - atomic_size) as usize] == 0)
                 || (top.pair.1 >= atomic_size
@@ -601,8 +608,16 @@ impl PbpeTrainer {
                 word_to_id.insert(new_token.clone(), new_token_id);
                 parents.push(top.pair);
                 id_active.push(1);
+                println!(
+                    "merged tokens: '{}' with token '{}'| count: {}",
+                    id_to_word[top.pair.0 as usize], id_to_word[top.pair.1 as usize], priority
+                );
             } else {
                 id_active[(new_token_id - atomic_size) as usize] = 1;
+                println!(
+                    "restored token: '{}'| count: {}",
+                    new_token, priority
+                );
             }
             actual_vocab_size += 1;
 
@@ -616,11 +631,8 @@ impl PbpeTrainer {
             // Merge the new pair in every words
             // Safety: This is just a type assertion, the code below may no longer be safe
             // if the type of `pos` changes
-            let pos: &HashSet<usize> = &top.pos;
-            // println!(
-            //     "merged tokens: '{}' with token '{}'| count: {}",
-            //     id_to_word[top.pair.0 as usize], id_to_word[top.pair.1 as usize], top.count
-            // );
+            let pos = &top.pos;
+            
 
             let words_len = words.len();
             struct WordPtr(*mut Word);
@@ -657,18 +669,18 @@ impl PbpeTrainer {
                 count_merged_tokens
                     .entry(top.pair.0)
                     .and_modify(|c| *c -= pair_counts[&top.pair]);
-                // println!("TOKEN TO REMOVE: {:#?}, IoS: {}", id_to_word[top.pair.0 as usize], (top.count as f64)/f64::from(count_1));
+                // println!("TOKEN TO REMOVE: {:#?}, IoS: {}", id_to_word[top.pair.0 as usize], (priority as f64)/f64::from(count_1));
 
-                if (top.count as f64) / f64::from(count_1) >= self.tau.unwrap()
+                if (priority as f64) / f64::from(count_1) >= self.tau.unwrap()
                     && (top.pair.0 >= atomic_size)
                 {
-                    // println!(
-                    //     "removed token: {:#?} with freq: {}, merged to {} with freq:{}",
-                    //     id_to_word[top.pair.0 as usize],
-                    //     f64::from(count_1),
-                    //     new_token,
-                    //     (top.count as f64)
-                    // );
+                    println!(
+                        "removed token: {:#?} with freq: {}, merged to {} with freq:{}",
+                        id_to_word[top.pair.0 as usize],
+                        f64::from(count_1),
+                        new_token,
+                        (priority as f64)
+                    );
 
                     removes_counter += 1;
                     // println!("REMOVED: {:#?}", &top.pair.0);
@@ -698,7 +710,7 @@ impl PbpeTrainer {
                     //update count on remove
                     for token in split_token {
                         if let Some(value) = count_merged_tokens.get_mut(&(token as u32)) {
-                            *value -= top.count as i32;
+                            *value -= priority as i32;
                         }
                     }
                 }
@@ -706,7 +718,7 @@ impl PbpeTrainer {
             if top.pair.1 != top.pair.0 {
                 if let Some(&count_2) = count_merged_tokens.get(&top.pair.1) {
                     // println!("SEEN: {:#?}", &top.pair.1);
-                    // println!("TOKEN TO REMOVE: {:#?}, IoS: {}", id_to_word[top.pair.1 as usize], (top.count as f64)/f64::from(count_2));
+                    // println!("TOKEN TO REMOVE: {:#?}, IoS: {}", id_to_word[top.pair.1 as usize], (priority as f64)/f64::from(count_2));
                     // println!("SELF.TAU: {:#?}", self.tau.unwrap());
                     // println!("atomic_size: {:#?}", atomic_size);
 
@@ -715,17 +727,16 @@ impl PbpeTrainer {
                         .entry(top.pair.1)
                         .and_modify(|c| *c -= pair_counts[&top.pair]);
 
-                    if (top.count as f64) / f64::from(count_2) >= self.tau.unwrap()
+                    if (priority as f64) / f64::from(count_2) >= self.tau.unwrap()
                         && (top.pair.1 >= atomic_size)
                     {
-                        // println!("REMOVED: {:#?}", &top.pair.1);
-                        // println!(
-                        //     "removed token: {:#?} with freq: {}, merged to {} with freq:{}",
-                        //     id_to_word[top.pair.1 as usize],
-                        //     f64::from(count_2),
-                        //     new_token,
-                        //     (top.count as f64)
-                        // );
+                        println!(
+                            "removed token: {:#?} with freq: {}, merged to {} with freq:{}",
+                            id_to_word[top.pair.1 as usize],
+                            f64::from(count_2),
+                            new_token,
+                            (priority as f64)
+                        );
 
                         removes_counter += 1;
                         id_active[(top.pair.1 - atomic_size) as usize] = 0;
@@ -753,7 +764,7 @@ impl PbpeTrainer {
                         //update counts on remove
                         for token in split_token {
                             if let Some(value) = count_merged_tokens.get_mut(&(token as u32)) {
-                                *value -= top.count as i32;
+                                *value -= priority as i32;
                             }
                         }
                     }
@@ -762,12 +773,14 @@ impl PbpeTrainer {
             // Introduce new formed pairs
             for ((pair, change), iw) in changes {
                 let count = change * counts[iw] as i32;
+
                 pair_counts
                     .entry(pair)
                     .and_modify(|c| *c += count)
                     .or_insert(count);
-
                 //modify token_counts
+                //TODO!
+                //check priority_queue +- priority
                 if change > 0 {
                     where_to_update
                         .entry(pair)
@@ -780,15 +793,24 @@ impl PbpeTrainer {
                             h
                         });
                 }
+                // println!("pair {} {}, count {}", pair.0, pair.1, pair_counts[&pair]);
+
+                // println!("found item in queue {:?}", queue.get_priority(&Merge{ pair, pos: where_to_update[&pair].iter().copied().collect::<Vec<_>>() }));
+
+                 queue.change_priority(&Merge{ pair, pos: Vec::new()}, pair_counts[&pair]);
+
+                
             }
             where_to_update.drain().for_each(|(pair, pos)| {
                 let count = pair_counts[&pair];
-                if count > 0 {
-                    queue.push(Merge {
-                        pair,
-                        count: count as u64,
-                        pos,
-                    });
+                if count >= 0 {
+
+                     queue.push(
+                        Merge {
+                            pair,
+                            pos: pos.into_iter().collect::<Vec<_>>(),
+                        },
+                        count,);
                 }
             });
 
@@ -954,6 +976,7 @@ mod tests {
             ("t".into(), 19),
             ("u".into(), 20),
             ("v".into(), 21),
+            ("re".into(), 22),  
             ("are".into(), 23),
             ("is".into(), 24),
         ]
@@ -969,12 +992,16 @@ mod tests {
         let expected_merges: HashMap<Pair, Vec<(u32, u32)>> = [
             ((17, 11), vec![(0, 22)]), // 'r' + 'e'  -> 're'
             ((8, 22), vec![(1, 23)]),  // 'a' + 're' -> 'are'
-            ((13, 18), vec![(2, 24)]), // 'i' + 's'  -> 'is'
+            ((13, 18), vec![(3, 24)]), // 'i' + 's'  -> 'is'
         ]
         .iter()
         .cloned()
         .collect();
         assert_eq!(model.merges, expected_merges);
+        let expected_splits: HashMap<u32, Vec<(u32, Vec<u32>)>>  = [
+            (22, vec![(2, vec![17, 11])])
+        ].iter().cloned().collect();
+        assert_eq!(model.splits, expected_splits);
     }
 
     #[test]
