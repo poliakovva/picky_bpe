@@ -1,5 +1,5 @@
 [package]
-authors = ["PleIAs"]
+authors = ["Vladyslav Poliakov"]
 edition = "2018"
 name = "pbpe_tokenizer"
 version = "0.1.0"

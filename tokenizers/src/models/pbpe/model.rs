@@ -492,47 +492,59 @@ mod tests {
     }
 
     #[test]
-    // Test tokenization.
-    // To test this, we'll build a simple model to tokenize the word 'unrelated'.
-    // fn test_tokenize() {
-    //     let vocab: Vocab = [
-    //         ("u".into(), 0),
-    //         ("n".into(), 1),
-    //         ("r".into(), 2),
-    //         ("e".into(), 3),
-    //         ("l".into(), 4),
-    //         ("a".into(), 5),
-    //         ("t".into(), 6),
-    //         ("d".into(), 7),
-    //         ("re".into(), 8),
-    //         ("at".into(), 9),
-    //         ("ed".into(), 10),
-    //         ("un".into(), 11),
-    //         ("ated".into(), 12),
-    //         ("rel".into(), 13),
-    //         ("related".into(), 14),
-    //         ("unrelated".into(), 15),
-    //     ]
-    //     .iter()
-    //     .cloned()
-    //     .collect();
-    //     let merges: Merges = vec![
-    //         ("r".to_string(), "e".to_string()),
-    //         ("a".to_string(), "t".to_string()),
-    //         ("e".to_string(), "d".to_string()),
-    //         ("u".to_string(), "n".to_string()),
-    //         ("at".to_string(), "ed".to_string()),
-    //         ("re".to_string(), "l".to_string()),
-    //         ("rel".to_string(), "ated".to_string()),
-    //         ("un".to_string(), "related".to_string()),
-    //     ];
-    //     let mut pbpe = PBPE::new(vocab, merges);
+    fn test_tokenize() {
+        let vocab: Vocab = [
+            ("u".into(), 0),
+            ("n".into(), 1),
+            ("r".into(), 2),
+            ("e".into(), 3),
+            ("l".into(), 4),
+            ("a".into(), 5),
+            ("t".into(), 6),
+            ("d".into(), 7),
+            ("re".into(), 8),
+            ("at".into(), 9),
+            ("ed".into(), 10),
+            ("un".into(), 11),
+            ("ated".into(), 12),
+            ("rel".into(), 13),
+            ("related".into(), 14),
+            ("unrelated".into(), 15),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+        let merges: MergeMap = vec![
+            // ("r", "e") -> "re", id 8
+            ((2, 3), vec![(0, 8)]),
+            // ("a", "t") -> "at", id 9
+            ((5, 6), vec![(1, 9)]),
+            // ("e", "d") -> "ed", id 10
+            ((3, 7), vec![(2, 10)]),
+            // ("u", "n") -> "un", id 11
+            ((0, 1), vec![(3, 11)]),
+            // ("at", "ed") -> "ated", id 12
+            ((9, 10), vec![(4, 12)]),
+            // ("re", "l") -> "rel", id 13
+            ((8, 4), vec![(5, 13)]),
+            // ("rel", "ated") -> "related", id 14
+            ((13, 12), vec![(6, 14)]),
+            // ("un", "related") -> "unrelated", id 15
+            ((11, 14), vec![(7, 15)]),
+        ]
+        .into_iter()
+        .collect();
+        
+        // No splits in this test
+        let splits: SplitMap = HashMap::new();
+        
+        let mut pbpe = PBPE::new(vocab, merges, splits);
 
-    //     // With no dropout:
-    //     let tokens = pbpe.tokenize("unrelated").unwrap();
-    //     assert_eq!(tokens, vec![Token::new(15u32, "unrelated".into(), (0, 9))]);
+        // With no dropout:
+        let tokens = pbpe.tokenize("unrelated").unwrap();
+        assert_eq!(tokens, vec![Token::new(15u32, "unrelated".into(), (0, 9))]);
+    }
 
-    // }
     #[test]
     fn test_pbpe_with_continuing_subword_prefix() {
         let vocab: Vocab = vec![
@@ -545,12 +557,17 @@ mod tests {
         .into_iter()
         .collect();
 
-        let merges: MergeMap = vec![((0, 1), vec![]), ((2, 3), vec![])]
-            .into_iter()
-            .collect();
+        let merges: MergeMap = vec![
+            // ("a", "##b") -> "ab", id 3
+            ((0, 1), vec![(0, 3)]),
+            // ("ab", "##c") -> "abc", id 4
+            ((3, 2), vec![(1, 4)]),
+        ]
+        .into_iter()
+        .collect();
 
         let pbpe = PBPE::builder()
-            .vocab_and_merges_and_splits(vocab, HashMap::new(), HashMap::new())
+            .vocab_and_merges_and_splits(vocab, merges, HashMap::new())
             .unk_token("[UNK]".to_string())
             .continuing_subword_prefix("##".to_string())
             .build()
@@ -644,21 +661,28 @@ mod tests {
         .iter()
         .cloned()
         .collect();
+        let merges: MergeMap = vec![
+            // (".", ":") -> ".:" (id 7)
+            ((2, 3), vec![(0, 7)]),
+            // ("b", "e") -> "be", id 10
+            ((20, 21), vec![(0, 10)]),
+            // ("be", "l") -> "bel", id 4
+            ((10, 11), vec![(1, 4)]),
+            // ("i", "r") -> "ir", id 12
+            ((17, 18), vec![(2, 12)]),
+            // ("t", "i") -> "ti", id 13
+            ((19, 17), vec![(3, 13)]),
+            // ("ir", "ti") -> "irti", id 16
+            ((12, 13), vec![(4, 16)]),
+            // ("irti", "l") -> "irtil", id 15
+            ((16, 11), vec![(5, 15)]),
+            // ("e", "n") -> "en", id 14
+            ((21, 22), vec![(6, 14)]),
+        ].into_iter().collect();
         let mut pbpe = PbpeBuilder::default()
             .vocab_and_merges_and_splits(
                 vocab,
-                vec![
-                    ((0, 1), vec![]),
-                    ((20, 21), vec![]),
-                    ((10, 11), vec![]),
-                    ((17, 18), vec![]),
-                    ((19, 17), vec![]),
-                    ((12, 13), vec![]),
-                    ((21, 22), vec![]),
-                    ((16, 11), vec![]),
-                ]
-                .into_iter()
-                .collect(),
+                merges,
                 HashMap::new(),
             )
             .ignore_merges(true)

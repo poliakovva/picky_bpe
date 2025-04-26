@@ -764,7 +764,7 @@ where
     /// Contrarily to `encode`, it does not compute offsets
     /// ```
     /// # use tokenizers::Tokenizer;
-    /// # use tokenizers::models::pbpe::BPE;
+    /// # use tokenizers::models::bpe::BPE;
     /// # let mut tokenizer = Tokenizer::new(BPE::default());
     /// #
     /// // Sequences:
@@ -806,7 +806,7 @@ where
     ///
     /// ```
     /// # use tokenizers::Tokenizer;
-    /// # use tokenizers::models::pbpe::BPE;
+    /// # use tokenizers::models::bpe::BPE;
     /// # let mut tokenizer = Tokenizer::new(BPE::default());
     /// #
     /// // Sequences:
@@ -849,7 +849,7 @@ where
     ///
     /// ```
     /// # use tokenizers::Tokenizer;
-    /// # use tokenizers::models::pbpe::BPE;
+    /// # use tokenizers::models::bpe::BPE;
     /// # let mut tokenizer = Tokenizer::new(BPE::default());
     /// #
     /// // Sequences:
