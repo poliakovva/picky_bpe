@@ -1,8 +1,8 @@
 [package]
 name = "pbpe_tokenizer"
 version = "0.20.1-dev.0"
-authors = ["Anthony MOI <m.anthony.moi@gmail.com>"]
-edition = "2021"
+authors = ["Vlad Polyakov <vladpolyakov@example.com>"]
+edition = "2025"
 
 [lib]
 name = "pbpe_tokenizer"

@@ -19,8 +19,8 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-keywords = ["NLP", "tokenizer", "BPE", "transformer", "deep learning"]
-description = "A Python implementation of Byte Pair Encoding (BPE) tokenizer"
+keywords = ["NLP", "tokenizer", "PBPE", "transformer", "deep learning"]
+description = "A Python implementation of Picky Byte Pair Encoding (BPE) tokenizer"
 license = "Apache-2.0"
 readme = "README.md"
 dependencies = []
