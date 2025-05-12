@@ -14,7 +14,7 @@ use tk::tokenizer::{
     TruncationDirection, TruncationParams, TruncationStrategy,
 };
 use tk::utils::iter::ResultShunt;
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 use super::decoders::PyDecoder;
 use super::encoding::PyEncoding;

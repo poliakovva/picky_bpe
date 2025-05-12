@@ -4,10 +4,10 @@ import time
 
 from tqdm import tqdm
 
-from tokenizers import Tokenizer, decoders, pre_tokenizers
-from tokenizers.models import BPE, WordPiece
-from tokenizers.normalizers import BertNormalizer
-from tokenizers.processors import BertProcessing
+from pbpe_tokenizer import Tokenizer, decoders, pre_tokenizers
+from pbpe_tokenizer.models import BPE, WordPiece
+from pbpe_tokenizer.normalizers import BertNormalizer
+from pbpe_tokenizer.processors import BertProcessing
 from transformers import BertTokenizer, GPT2Tokenizer
 
 logging.getLogger("transformers").disabled = True

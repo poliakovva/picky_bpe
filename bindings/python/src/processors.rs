@@ -15,7 +15,7 @@ use tk::processors::sequence::Sequence;
 use tk::processors::template::{SpecialToken, Template};
 use tk::processors::PostProcessorWrapper;
 use tk::{Encoding, PostProcessor};
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 /// Base class for all post-processors
 ///

@@ -11,7 +11,7 @@ use tk::normalizers::{
     Strip, StripAccents, NFC, NFD, NFKC, NFKD,
 };
 use tk::{NormalizedString, Normalizer};
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 /// Represents the different kind of NormalizedString we can receive from Python:
 ///  - Owned: Created in Python and owned by Python

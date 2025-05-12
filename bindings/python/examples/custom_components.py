@@ -1,11 +1,11 @@
 from typing import List
 
 import jieba
-from tokenizers import NormalizedString, PreTokenizedString, Regex, Tokenizer
-from tokenizers.decoders import Decoder
-from tokenizers.models import BPE
-from tokenizers.normalizers import Normalizer
-from tokenizers.pre_tokenizers import PreTokenizer
+from pbpe_tokenizer import NormalizedString, PreTokenizedString, Regex, Tokenizer
+from pbpe_tokenizer.decoders import Decoder
+from pbpe_tokenizer.models import BPE
+from pbpe_tokenizer.normalizers import Normalizer
+from pbpe_tokenizer.pre_tokenizers import PreTokenizer
 
 
 class JiebaPreTokenizer:

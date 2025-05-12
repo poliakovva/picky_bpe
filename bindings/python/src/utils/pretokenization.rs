@@ -1,4 +1,4 @@
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 use pyo3::exceptions;
 use pyo3::prelude::*;

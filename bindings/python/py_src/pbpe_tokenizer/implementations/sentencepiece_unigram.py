@@ -2,8 +2,8 @@ import json
 import os
 from typing import Iterator, List, Optional, Union, Tuple
 
-from tokenizers import AddedToken, Regex, Tokenizer, decoders, normalizers, pre_tokenizers, trainers
-from tokenizers.models import Unigram
+from pbpe_tokenizer import AddedToken, Regex, Tokenizer, decoders, normalizers, pre_tokenizers, trainers
+from pbpe_tokenizer.models import Unigram
 
 from .base_tokenizer import BaseTokenizer
 

@@ -250,6 +250,84 @@ class BPE(Model):
         """
         pass
 
+class PBPE(Model):
+    """
+    An implementation of the PBPE  algorithm
+    """
+    def __init__(vocab=None, merges=None, splits=None, **kwargs):
+        pass
+
+    def get_trainer(self):
+        """
+        Get the associated :class:`~tokenizers.trainers.Trainer`
+
+        Retrieve the :class:`~tokenizers.trainers.Trainer` associated to this
+        :class:`~tokenizers.models.Model`.
+
+        Returns:
+            :class:`~tokenizers.trainers.Trainer`: The Trainer used to train this model
+        """
+        pass
+
+    def id_to_token(self, id):
+        """
+        Get the token associated to an ID
+
+        Args:
+            id (:obj:`int`):
+                An ID to convert to a token
+
+        Returns:
+            :obj:`str`: The token associated to the ID
+        """
+        pass
+
+    def save(self, folder, prefix):
+        """
+        Save the current model
+
+        Save the current model in the given folder, using the given prefix for the various
+        files that will get created.
+        Any file with the same name that already exists in this folder will be overwritten.
+
+        Args:
+            folder (:obj:`str`):
+                The path to the target folder in which to save the various files
+
+            prefix (:obj:`str`, `optional`):
+                An optional prefix, used to prefix each file name
+
+        Returns:
+            :obj:`List[str]`: The list of saved files
+        """
+        pass
+
+    def token_to_id(self, tokens):
+        """
+        Get the ID associated to a token
+
+        Args:
+            token (:obj:`str`):
+                A token to convert to an ID
+
+        Returns:
+            :obj:`int`: The ID associated to the token
+        """
+        pass
+
+    def tokenize(self, sequence):
+        """
+        Tokenize a sequence
+
+        Args:
+            sequence (:obj:`str`):
+                A sequence to tokenize
+
+        Returns:
+            A :obj:`List` of :class:`~tokenizers.Token`: The generated tokens
+        """
+        pass
+
 class Unigram(Model):
     """
     An implementation of the Unigram algorithm

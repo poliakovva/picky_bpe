@@ -1,4 +1,4 @@
-import tokenizers
+import pbpe_tokenizer
 from argparse import ArgumentParser
 import sentencepiece as spm
 from collections import Counter
@@ -89,7 +89,7 @@ def check_train(args):
     sp = spm.SentencePieceProcessor()
     sp.Load(args.model_file)
 
-    tokenizer = tokenizers.SentencePieceUnigramTokenizer()
+    tokenizer = pbpe_tokenizer.SentencePieceUnigramTokenizer()
     tokenizer.train(args.input_file, show_progress=False)
 
     spm_tokens = 0
@@ -210,11 +210,11 @@ def check_encode(args):
     sp.Load(args.model_file)
 
     if args.from_spm:
-        tok = tokenizers.SentencePieceUnigramTokenizer.from_spm(args.model_file)
+        tok = pbpe_tokenizer.SentencePieceUnigramTokenizer.from_spm(args.model_file)
     else:
         vocab = [(sp.id_to_piece(i), sp.get_score(i)) for i in range(sp.piece_size())]
         unk_id = sp.unk_id()
-        tok = tokenizers.SentencePieceUnigramTokenizer(vocab, unk_id)
+        tok = pbpe_tokenizer.SentencePieceUnigramTokenizer(vocab, unk_id)
 
     perfect = 0
     imperfect = 0

@@ -3,7 +3,7 @@
 DATA_DIR = data
 
 dir_guard=@mkdir -p $(@D)
-check_dirs := examples py_src/tokenizers tests
+check_dirs := examples py_src/pbpe_tokenizer tests
 
 # Format source code automatically
 style:
@@ -14,8 +14,8 @@ style:
 # Check the source code is formatted correctly
 check-style:
 	python stub.py --check
-	ruff check examples py_src/tokenizers tests 
-	ruff format --check examples py_src/tokenizers tests 
+	ruff check examples py_src/pbpe_tokenizer tests 
+	ruff format --check examples py_src/pbpe_tokenizer tests 
 
 TESTS_RESOURCES = $(DATA_DIR)/small.txt $(DATA_DIR)/roberta.json
 

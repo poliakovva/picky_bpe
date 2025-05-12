@@ -46,6 +46,48 @@ class BpeTrainer(Trainer):
 
     """
 
+class PbpeTrainer(Trainer):
+    """
+    Trainer capable of training a PBPE model
+
+    Args:
+        vocab_size (:obj:`int`, `optional`):
+            The size of the final vocabulary, including all tokens and alphabet.
+
+        min_frequency (:obj:`int`, `optional`):
+            The minimum frequency a pair should have in order to be merged.
+
+        show_progress (:obj:`bool`, `optional`):
+            Whether to show progress bars while training.
+
+        special_tokens (:obj:`List[Union[str, AddedToken]]`, `optional`):
+            A list of special tokens the model should know of.
+
+        limit_alphabet (:obj:`int`, `optional`):
+            The maximum different characters to keep in the alphabet.
+
+        initial_alphabet (:obj:`List[str]`, `optional`):
+            A list of characters to include in the initial alphabet, even
+            if not seen in the training dataset.
+            If the strings contain more than one character, only the first one
+            is kept.
+
+        continuing_subword_prefix (:obj:`str`, `optional`):
+            A prefix to be used for every subword that is not a beginning-of-word.
+
+        end_of_word_suffix (:obj:`str`, `optional`):
+            A suffix to be used for every subword that is a end-of-word.
+
+        max_token_length (:obj:`int`, `optional`):
+            Prevents creating tokens longer than the specified size.
+            This can help with reducing polluting your vocabulary with
+            highly repetitive tokens like `======` for wikipedia
+
+        tau (:obj:`float`, `optional`):
+            Threshold for IoS (Information of Split) metric. Used to determine when to split tokens.
+
+    """
+
 class UnigramTrainer(Trainer):
     """
     Trainer capable of training a Unigram model

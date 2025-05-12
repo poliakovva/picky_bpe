@@ -19,7 +19,7 @@ use tk::pre_tokenizers::whitespace::{Whitespace, WhitespaceSplit};
 use tk::pre_tokenizers::PreTokenizerWrapper;
 use tk::tokenizer::Offsets;
 use tk::{PreTokenizedString, PreTokenizer};
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 use super::error::ToPyResult;
 use super::utils::*;

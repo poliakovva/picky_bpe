@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::*;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use pbpe_tokenizer as tk;
 use tk::decoders::bpe::BPEDecoder;
 use tk::decoders::byte_fallback::ByteFallback;
 use tk::decoders::byte_level::ByteLevel;
@@ -19,7 +20,6 @@ use tk::decoders::wordpiece::WordPiece;
 use tk::decoders::DecoderWrapper;
 use tk::normalizers::replace::Replace;
 use tk::Decoder;
-use tokenizers as tk;
 
 use super::error::ToPyResult;
 

@@ -1,8 +1,8 @@
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-from tokenizers import AddedToken, Tokenizer, decoders, pre_tokenizers, processors, trainers
-from tokenizers.models import BPE
-from tokenizers.normalizers import Lowercase, Sequence, unicode_normalizer_from_str
+from pbpe_tokenizer import AddedToken, Tokenizer, decoders, pre_tokenizers, processors, trainers
+from pbpe_tokenizer.models import BPE
+from pbpe_tokenizer.normalizers import Lowercase, Sequence, unicode_normalizer_from_str
 
 from .base_tokenizer import BaseTokenizer
 

@@ -8,13 +8,13 @@ use pyo3::types::*;
 use serde::{Deserialize, Serialize};
 use tk::models::TrainerWrapper;
 use tk::Trainer;
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 /// Base class for all trainers
 ///
 /// This class is not supposed to be instantiated directly. Instead, any implementation of a
 /// Trainer will return an instance of this class when instantiated.
-#[pyclass(module = "tokenizers.trainers", name = "Trainer", subclass)]
+#[pyclass(module = "pbpe_tokenizer.trainers", name = "Trainer", subclass)]
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct PyTrainer {
@@ -38,6 +38,9 @@ impl PyTrainer {
             }
             TrainerWrapper::UnigramTrainer(_) => {
                 Py::new(py, (PyUnigramTrainer {}, base))?.into_py(py)
+            }
+            TrainerWrapper::PbpeTrainer(_) => {
+                Py::new(py, (PyPbpeTrainer {}, base))?.into_py(py)
             }
         })
     }
@@ -177,7 +180,7 @@ macro_rules! setter {
 ///         This can help with reducing polluting your vocabulary with
 ///         highly repetitive tokens like `======` for wikipedia
 ///
-#[pyclass(extends=PyTrainer, module = "tokenizers.trainers", name = "BpeTrainer")]
+#[pyclass(extends=PyTrainer, module = "pbpe_tokenizer.trainers", name = "BpeTrainer")]
 pub struct PyBpeTrainer {}
 #[pymethods]
 impl PyBpeTrainer {
@@ -391,7 +394,7 @@ impl PyBpeTrainer {
 ///
 ///     end_of_word_suffix (:obj:`str`, `optional`):
 ///         A suffix to be used for every subword that is a end-of-word.
-#[pyclass(extends=PyTrainer, module = "tokenizers.trainers", name = "WordPieceTrainer")]
+#[pyclass(extends=PyTrainer, module = "pbpe_tokenizer.trainers", name = "WordPieceTrainer")]
 pub struct PyWordPieceTrainer {}
 #[pymethods]
 impl PyWordPieceTrainer {
@@ -583,7 +586,7 @@ impl PyWordPieceTrainer {
 ///
 ///     special_tokens (:obj:`List[Union[str, AddedToken]]`):
 ///         A list of special tokens the model should know of.
-#[pyclass(extends=PyTrainer, module = "tokenizers.trainers", name = "WordLevelTrainer")]
+#[pyclass(extends=PyTrainer, module = "pbpe_tokenizer.trainers", name = "WordLevelTrainer")]
 pub struct PyWordLevelTrainer {}
 #[pymethods]
 impl PyWordLevelTrainer {
@@ -739,7 +742,7 @@ impl PyWordLevelTrainer {
 ///     n_sub_iterations (:obj:`int`):
 ///         The number of iterations of the EM algorithm to perform before
 ///         pruning the vocabulary.
-#[pyclass(extends=PyTrainer, module = "tokenizers.trainers", name = "UnigramTrainer")]
+#[pyclass(extends=PyTrainer, module = "pbpe_tokenizer.trainers", name = "UnigramTrainer")]
 pub struct PyUnigramTrainer {}
 #[pymethods]
 impl PyUnigramTrainer {
@@ -873,19 +876,260 @@ impl PyUnigramTrainer {
             }
         }
 
-        let trainer: tokenizers::models::unigram::UnigramTrainer =
+        let trainer: pbpe_tokenizer::models::unigram::UnigramTrainer =
             builder.build().map_err(|e| {
                 exceptions::PyException::new_err(format!("Cannot build UnigramTrainer: {}", e))
             })?;
         Ok((PyUnigramTrainer {}, trainer.into()))
     }
 }
+////////////////////////////////////////////////////////////
+/// Trainer capable of training a PBPE model
+///
+/// Args:
+///     vocab_size (:obj:`int`, `optional`):
+///         The size of the final vocabulary, including all tokens and alphabet.
+///
+///     min_frequency (:obj:`int`, `optional`):
+///         The minimum frequency a pair should have in order to be merged.
+///
+///     show_progress (:obj:`bool`, `optional`):
+///         Whether to show progress bars while training.
+///
+///     special_tokens (:obj:`List[Union[str, AddedToken]]`, `optional`):
+///         A list of special tokens the model should know of.
+///
+///     limit_alphabet (:obj:`int`, `optional`):
+///         The maximum different characters to keep in the alphabet.
+///
+///     initial_alphabet (:obj:`List[str]`, `optional`):
+///         A list of characters to include in the initial alphabet, even
+///         if not seen in the training dataset.
+///         If the strings contain more than one character, only the first one
+///         is kept.
+///
+///     continuing_subword_prefix (:obj:`str`, `optional`):
+///         A prefix to be used for every subword that is not a beginning-of-word.
+///
+///     end_of_word_suffix (:obj:`str`, `optional`):
+///         A suffix to be used for every subword that is a end-of-word.
+///
+///     max_token_length (:obj:`int`, `optional`):
+///         Prevents creating tokens longer than the specified size.
+///         This can help with reducing polluting your vocabulary with
+///         highly repetitive tokens like `======` for wikipedia
+///
+///     tau (:obj:`float`, `optional`):
+///         Threshold for IoS (Information of Split) metric. Used to determine when to split tokens.
+///
+
+#[pyclass(extends=PyTrainer, module = "pbpe_tokenizer.trainers", name = "PbpeTrainer")]
+pub struct PyPbpeTrainer {}
+#[pymethods]
+impl PyPbpeTrainer {
+    #[getter]
+    fn get_vocab_size(self_: PyRef<Self>) -> usize {
+        getter!(self_, PbpeTrainer, vocab_size)
+    }
+
+    #[setter]
+    fn set_vocab_size(self_: PyRef<Self>, vocab_size: usize) {
+        setter!(self_, PbpeTrainer, vocab_size, vocab_size);
+    }
+
+    #[getter]
+    fn get_min_frequency(self_: PyRef<Self>) -> u64 {
+        getter!(self_, PbpeTrainer, min_frequency)
+    }
+
+    #[setter]
+    fn set_min_frequency(self_: PyRef<Self>, freq: u64) {
+        setter!(self_, PbpeTrainer, min_frequency, freq);
+    }
+
+    #[getter]
+    fn get_show_progress(self_: PyRef<Self>) -> bool {
+        getter!(self_, PbpeTrainer, show_progress)
+    }
+
+    #[setter]
+    fn set_show_progress(self_: PyRef<Self>, show_progress: bool) {
+        setter!(self_, PbpeTrainer, show_progress, show_progress);
+    }
+
+    #[getter]
+    fn get_special_tokens(self_: PyRef<Self>) -> Vec<PyAddedToken> {
+        getter!(
+            self_,
+            PbpeTrainer,
+            special_tokens
+                .iter()
+                .map(|tok| tok.clone().into())
+                .collect()
+        )
+    }
+
+    #[setter]
+    fn set_special_tokens(self_: PyRef<Self>, special_tokens: &Bound<'_, PyList>) -> PyResult<()> {
+        setter!(
+            self_,
+            PbpeTrainer,
+            special_tokens,
+            special_tokens
+                .into_iter()
+                .map(|token| {
+                    if let Ok(content) = token.extract::<String>() {
+                        Ok(tk::tokenizer::AddedToken::from(content, true))
+                    } else if let Ok(mut token) = token.extract::<PyRefMut<PyAddedToken>>() {
+                        token.special = true;
+                        Ok(token.get_token())
+                    } else {
+                        Err(exceptions::PyTypeError::new_err(
+                            "Special tokens must be a List[Union[str, AddedToken]]",
+                        ))
+                    }
+                })
+                .collect::<PyResult<Vec<_>>>()?
+        );
+        Ok(())
+    }
+
+    #[getter]
+    fn get_limit_alphabet(self_: PyRef<Self>) -> Option<usize> {
+        getter!(self_, PbpeTrainer, limit_alphabet)
+    }
+
+    #[setter]
+    fn set_limit_alphabet(self_: PyRef<Self>, limit: Option<usize>) {
+        setter!(self_, PbpeTrainer, limit_alphabet, limit);
+    }
+
+    #[getter]
+    fn get_max_token_length(self_: PyRef<Self>) -> Option<usize> {
+        getter!(self_, PbpeTrainer, max_token_length)
+    }
+
+    #[setter]
+    fn set_max_token_length(self_: PyRef<Self>, limit: Option<usize>) {
+        setter!(self_, PbpeTrainer, max_token_length, limit);
+    }
+
+    #[getter]
+    fn get_initial_alphabet(self_: PyRef<Self>) -> Vec<String> {
+        getter!(
+            self_,
+            PbpeTrainer,
+            initial_alphabet.iter().map(|c| c.to_string()).collect()
+        )
+    }
+
+    #[setter]
+    fn set_initial_alphabet(self_: PyRef<Self>, alphabet: Vec<char>) {
+        setter!(
+            self_,
+            PbpeTrainer,
+            initial_alphabet,
+            alphabet.into_iter().collect()
+        );
+    }
+
+    #[getter]
+    fn get_continuing_subword_prefix(self_: PyRef<Self>) -> Option<String> {
+        getter!(self_, PbpeTrainer, continuing_subword_prefix.clone())
+    }
+
+    #[setter]
+    fn set_continuing_subword_prefix(self_: PyRef<Self>, prefix: Option<String>) {
+        setter!(self_, PbpeTrainer, continuing_subword_prefix, prefix);
+    }
+
+    #[getter]
+    fn get_end_of_word_suffix(self_: PyRef<Self>) -> Option<String> {
+        getter!(self_, PbpeTrainer, end_of_word_suffix.clone())
+    }
+
+    #[setter]
+    fn set_end_of_word_suffix(self_: PyRef<Self>, suffix: Option<String>) {
+        setter!(self_, PbpeTrainer, end_of_word_suffix, suffix);
+    }
+
+    #[getter]
+    fn get_tau(self_: PyRef<Self>) -> Option<f64> {
+        getter!(self_, PbpeTrainer, tau)
+    }
+
+    #[setter]
+    fn set_tau(self_: PyRef<Self>, tau: Option<f64>) {
+        setter!(self_, PbpeTrainer, tau, tau);
+    }
+
+    #[new]
+    #[pyo3(signature = (**kwargs), text_signature = None)]
+    pub fn new(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<(Self, PyTrainer)> {
+        let mut builder = tk::models::pbpe::PbpeTrainer::builder();
+        if let Some(kwargs) = kwargs {
+            for (key, val) in kwargs {
+                let key: &str = key.extract()?;
+                match key {
+                    "vocab_size" => builder = builder.vocab_size(val.extract()?),
+                    "min_frequency" => builder = builder.min_frequency(val.extract()?),
+                    "show_progress" => builder = builder.show_progress(val.extract()?),
+                    "special_tokens" => {
+                        builder = builder.special_tokens(
+                            val.downcast::<PyList>()?
+                                .into_iter()
+                                .map(|token| {
+                                    if let Ok(content) = token.extract::<String>() {
+                                        Ok(PyAddedToken::from(content, Some(true)).get_token())
+                                    } else if let Ok(mut token) =
+                                        token.extract::<PyRefMut<PyAddedToken>>()
+                                    {
+                                        token.special = true;
+                                        Ok(token.get_token())
+                                    } else {
+                                        Err(exceptions::PyTypeError::new_err(
+                                            "special_tokens must be a List[Union[str, AddedToken]]",
+                                        ))
+                                    }
+                                })
+                                .collect::<PyResult<Vec<_>>>()?,
+                        );
+                    }
+                    "limit_alphabet" => builder = builder.limit_alphabet(val.extract()?),
+                    "max_token_length" => builder = builder.max_token_length(val.extract()?),
+                    "initial_alphabet" => {
+                        let alphabet: Vec<String> = val.extract()?;
+                        builder = builder.initial_alphabet(
+                            alphabet
+                                .into_iter()
+                                .filter_map(|s| s.chars().next())
+                                .collect(),
+                        );
+                    }
+                    "continuing_subword_prefix" => {
+                        builder = builder.continuing_subword_prefix(val.extract()?)
+                    }
+                    "end_of_word_suffix" => builder = builder.end_of_word_suffix(val.extract()?),
+                    "tau" => builder = builder.tau(val.extract()?),
+                    _ => return Err(exceptions::PyTypeError::new_err(format!(
+                        "there is some bug with'{}'",
+                        key
+                    ))),
+                };
+            }
+        }
+        let trainer = builder.build();
+        Ok((PyPbpeTrainer {}, trainer.into()))
+    }
+}
+////////////////////////////////////////////////////////////
 
 /// Trainers Module
 #[pymodule]
 pub fn trainers(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTrainer>()?;
     m.add_class::<PyBpeTrainer>()?;
+    m.add_class::<PyPbpeTrainer>()?;
     m.add_class::<PyWordPieceTrainer>()?;
     m.add_class::<PyWordLevelTrainer>()?;
     m.add_class::<PyUnigramTrainer>()?;

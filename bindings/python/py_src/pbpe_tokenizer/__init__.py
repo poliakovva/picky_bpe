@@ -75,7 +75,7 @@ class SplitDelimiterBehavior(Enum):
     CONTIGUOUS = "contiguous"
 
 
-from .tokenizers import (
+from .pbpe_tokenizer import (
     AddedToken,
     Encoding,
     NormalizedString,
@@ -98,3 +98,4 @@ from .implementations import (
     SentencePieceBPETokenizer,
     SentencePieceUnigramTokenizer,
 )
+

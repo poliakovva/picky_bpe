@@ -180,6 +180,6 @@ if __name__ == "__main__":
     parser.add_argument("--check", action="store_true")
 
     args = parser.parse_args()
-    import tokenizers
+    import pbpe_tokenizer
 
-    write(tokenizers.tokenizers, "py_src/tokenizers/", "tokenizers", check=args.check)
+    write(pbpe_tokenizer.pbpe_tokenizer, "py_src/pbpe_tokenizer/", "pbpe_tokenizer", check=args.check)

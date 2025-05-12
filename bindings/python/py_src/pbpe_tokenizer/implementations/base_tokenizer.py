@@ -1,11 +1,11 @@
 from typing import Dict, List, Optional, Tuple, Union
 
-from tokenizers import AddedToken, EncodeInput, Encoding, InputSequence, Tokenizer
-from tokenizers.decoders import Decoder
-from tokenizers.models import Model
-from tokenizers.normalizers import Normalizer
-from tokenizers.pre_tokenizers import PreTokenizer
-from tokenizers.processors import PostProcessor
+from pbpe_tokenizer import AddedToken, EncodeInput, Encoding, InputSequence, Tokenizer
+from pbpe_tokenizer.decoders import Decoder
+from pbpe_tokenizer.models import Model
+from pbpe_tokenizer.normalizers import Normalizer
+from pbpe_tokenizer.pre_tokenizers import PreTokenizer
+from pbpe_tokenizer.processors import PostProcessor
 
 
 Offsets = Tuple[int, int]

@@ -2,7 +2,7 @@ use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use tokenizers::tokenizer::Result;
+use pbpe_tokenizer::tokenizer::Result;
 
 #[derive(Debug)]
 pub struct PyError(pub String);

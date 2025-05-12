@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::*;
 use tk::tokenizer::{Offsets, PaddingDirection};
 use tk::utils::truncation::TruncationDirection;
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 use crate::error::{deprecation_warning, PyError};
 

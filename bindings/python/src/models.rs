@@ -9,12 +9,14 @@ use pyo3::prelude::*;
 use pyo3::types::*;
 use serde::{Deserialize, Serialize};
 use tk::models::bpe::{BpeBuilder, Merges, Vocab, BPE};
+use tk::models::pbpe::{PbpeBuilder, MergeMap, SplitMap, PBPE};
+
 use tk::models::unigram::Unigram;
 use tk::models::wordlevel::WordLevel;
 use tk::models::wordpiece::{WordPiece, WordPieceBuilder};
 use tk::models::ModelWrapper;
 use tk::{Model, Token};
-use tokenizers as tk;
+use pbpe_tokenizer as tk;
 
 use super::error::{deprecation_warning, ToPyResult};
 
@@ -36,6 +38,7 @@ impl PyModel {
         let base = self.clone();
         Ok(match *self.model.as_ref().read().unwrap() {
             ModelWrapper::BPE(_) => Py::new(py, (PyBPE {}, base))?.into_py(py),
+            ModelWrapper::PBPE(_) => Py::new(py, (PyPBPE {}, base))?.into_py(py), 
             ModelWrapper::WordPiece(_) => Py::new(py, (PyWordPiece {}, base))?.into_py(py),
             ModelWrapper::WordLevel(_) => Py::new(py, (PyWordLevel {}, base))?.into_py(py),
             ModelWrapper::Unigram(_) => Py::new(py, (PyUnigram {}, base))?.into_py(py),
@@ -536,6 +539,160 @@ impl PyBPE {
     }
 }
 
+////////////////////////////////////////////////////////////
+/// An implementation of the PBPE  algorithm
+#[pyclass(extends=PyModel, module = "tokenizers.models", name = "PBPE")]
+pub struct PyPBPE {}
+
+#[derive(FromPyObject)]
+enum PyMergeMap {
+    MergeMap(MergeMap),
+    Filename(String),
+}
+
+#[derive(FromPyObject)]
+enum PySplitMap {
+    SplitMap(SplitMap),
+    Filename(String),
+}
+
+#[pymethods]
+impl PyPBPE {
+    // Add these getter/setter methods after the new() function
+
+    #[getter]
+    fn get_unk_token(self_: PyRef<Self>) -> Option<String> {
+        getter!(self_, PBPE, unk_token.clone())
+    }
+
+    #[setter]
+    fn set_unk_token(self_: PyRef<Self>, unk_token: Option<String>) {
+        setter!(self_, PBPE, unk_token, unk_token);
+    }
+
+    #[getter]
+    fn get_continuing_subword_prefix(self_: PyRef<Self>) -> Option<String> {
+        getter!(self_, PBPE, continuing_subword_prefix.clone())
+    }
+
+    #[setter]
+    fn set_continuing_subword_prefix(
+        self_: PyRef<Self>,
+        continuing_subword_prefix: Option<String>,
+    ) {
+        setter!(
+            self_,
+            PBPE,
+            continuing_subword_prefix,
+            continuing_subword_prefix
+        );
+    }
+
+    #[getter]
+    fn get_end_of_word_suffix(self_: PyRef<Self>) -> Option<String> {
+        getter!(self_, PBPE, end_of_word_suffix.clone())
+    }
+
+    #[setter]
+    fn set_end_of_word_suffix(self_: PyRef<Self>, end_of_word_suffix: Option<String>) {
+        setter!(self_, PBPE, end_of_word_suffix, end_of_word_suffix);
+    }
+
+    #[getter]
+    fn get_fuse_unk(self_: PyRef<Self>) -> bool {
+        getter!(self_, PBPE, fuse_unk)
+    }
+
+    #[setter]
+    fn set_fuse_unk(self_: PyRef<Self>, fuse_unk: bool) {
+        setter!(self_, PBPE, fuse_unk, fuse_unk);
+    }
+
+    #[getter]
+    fn get_byte_fallback(self_: PyRef<Self>) -> bool {
+        getter!(self_, PBPE, byte_fallback)
+    }
+
+    #[setter]
+    fn set_byte_fallback(self_: PyRef<Self>, byte_fallback: bool) {
+        setter!(self_, PBPE, byte_fallback, byte_fallback);
+    }
+
+    #[getter]
+    fn get_ignore_merges(self_: PyRef<Self>) -> bool {
+        getter!(self_, PBPE, ignore_merges)
+    }
+
+    #[setter]
+    fn set_ignore_merges(self_: PyRef<Self>, ignore_merges: bool) {
+        setter!(self_, PBPE, ignore_merges, ignore_merges);
+    }
+
+    #[new]
+    #[pyo3(signature = (vocab=None, merges=None, splits=None, **kwargs))]
+    fn new(
+        py: Python<'_>,
+        vocab: Option<PyVocab>,
+        merges: Option<PyMergeMap>,
+        splits: Option<PySplitMap>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<(Self, PyModel)> {
+        if (vocab.is_some() && (merges.is_none() || splits.is_none())) || 
+           (vocab.is_none() && (merges.is_some() || splits.is_some())) {
+            return Err(exceptions::PyValueError::new_err(
+                "`vocab`, `merges`, and `splits` must be all specified together",
+            ));
+        }
+
+        let mut builder = PBPE::builder();
+        if let (Some(vocab), Some(merges), Some(splits)) = (vocab, merges, splits) {
+            match (vocab, merges, splits) {
+                (PyVocab::Vocab(vocab), PyMergeMap::MergeMap(merges), PySplitMap::SplitMap(splits)) => {
+                    builder = builder.vocab_and_merges_and_splits(vocab, merges, splits);
+                }
+                _ => {
+                    return Err(exceptions::PyValueError::new_err(
+                        "`vocab`, `merges`, and `splits` must be all from memory or all filenames",
+                    ));
+                }
+            }
+        }
+
+        // Handle kwargs similar to BPE
+        if let Some(kwargs) = kwargs {
+            for (key, value) in kwargs {
+                let key: &str = key.extract()?;
+                match key {
+                    "cache_capacity" => builder = builder.cache_capacity(value.extract()?),
+                    "unk_token" => {
+                        if let Some(unk) = value.extract()? {
+                            builder = builder.unk_token(unk);
+                        }
+                    }
+                    "continuing_subword_prefix" => {
+                        builder = builder.continuing_subword_prefix(value.extract()?)
+                    }
+                    "end_of_word_suffix" => builder = builder.end_of_word_suffix(value.extract()?),
+                    "fuse_unk" => builder = builder.fuse_unk(value.extract()?),
+                    "byte_fallback" => builder = builder.byte_fallback(value.extract()?),
+                    "ignore_merges" => builder = builder.ignore_merges(value.extract()?),
+                    _ => println!("Ignored unknown kwarg option {}", key),
+                };
+            }
+        }
+
+        match builder.build() {
+            Err(e) => Err(exceptions::PyException::new_err(format!(
+                "Error while initializing PBPE: {}",
+                e
+            ))),
+            Ok(pbpe) => Ok((PyPBPE {}, pbpe.into())),
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////
+
 /// An implementation of the WordPiece algorithm
 ///
 /// Args:
@@ -865,6 +1022,7 @@ impl PyUnigram {
 pub fn models(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyModel>()?;
     m.add_class::<PyBPE>()?;
+    m.add_class::<PyPBPE>()?;  
     m.add_class::<PyWordPiece>()?;
     m.add_class::<PyWordLevel>()?;
     m.add_class::<PyUnigram>()?;
