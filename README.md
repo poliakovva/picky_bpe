@@ -1,79 +1,104 @@
-<p align="center">
-    <br>
-    <img src="https://huggingface.co/landing/assets/tokenizers/tokenizers-logo.png" width="600"/>
-    <br>
-<p>
-<p align="center">
-    <img alt="Build" src="https://github.com/huggingface/tokenizers/workflows/Rust/badge.svg">
-    <a href="https://github.com/huggingface/tokenizers/blob/main/LICENSE">
-        <img alt="GitHub" src="https://img.shields.io/github/license/huggingface/tokenizers.svg?color=blue&cachedrop">
-    </a>
-    <a href="https://pepy.tech/project/tokenizers">
-        <img src="https://pepy.tech/badge/tokenizers/week" />
-    </a>
-</p>
-
-Provides an implementation of today's most used tokenizers, with a focus on performance and
-versatility.
+Provides an implementation of of the Picky BPE (Byte-Pair Encoding) tokenizer, an enhanced version of BPE
 
 ## Main features:
+ - Built on top of **HuggingFace tokenizers** for seamless integration with existing NLP pipelines
+ - High-performance Rust core with Python bindings for easy adoption
+ - Blazing fast execution speeds for both training and inference
+ - Full compatibility with HuggingFace's tokenizer ecosystem
 
- - Train new vocabularies and tokenize, using today's most used tokenizers.
- - Extremely fast (both training and tokenization), thanks to the Rust implementation. Takes
-   less than 20 seconds to tokenize a GB of text on a server's CPU.
- - Easy to use, but also extremely versatile.
- - Designed for research and production.
- - Normalization comes with alignments tracking. It's always possible to get the part of the
-   original sentence that corresponds to a given token.
- - Does all the pre-processing: Truncate, Pad, add the special tokens your model needs.
+## Building from Source
 
-## Performances
-Performances can vary depending on hardware, but running the [~/bindings/python/benches/test_tiktoken.py](bindings/python/benches/test_tiktoken.py) should give the following on a g6 aws instance:
-![image](https://github.com/user-attachments/assets/2b913d4b-e488-4cbc-b542-f90a6c40643d)
+### Prerequisites
+- Python 3.7 or higher
+- Rust toolchain
+- Maturin (Python build tool)
 
+### Build Steps
+1. Install Rust:
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
 
-## Bindings
+2. Install Maturin:
+   ```bash
+   pip install maturin
+   ```
 
-We provide bindings to the following languages (more to come!):
-  - [Rust](https://github.com/huggingface/tokenizers/tree/main/tokenizers) (Original implementation)
-  - [Python](https://github.com/huggingface/tokenizers/tree/main/bindings/python)
-  - [Node.js](https://github.com/huggingface/tokenizers/tree/main/bindings/node)
-  - [Ruby](https://github.com/ankane/tokenizers-ruby) (Contributed by @ankane, external repo)
+3. Build the project:
+   ```bash
+   cd bindings/python && maturin develop --release 
+   ```
+The last command installs the **pbpe_tokenizer** module in your Python environment, making it available for import and use in your Python projects.
  
+
 ## Quick example using Python:
 
-Choose your model between Byte-Pair Encoding, WordPiece or Unigram and instantiate a tokenizer:
 
 ```python
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
+from pbpe_tokenizer import Tokenizer
+from pbpe_tokenizer.trainers import PbpeTrainer
+from pbpe_tokenizer.models import PBPE
+from pbpe_tokenizer.pre_tokenizers import Whitespace
 
-tokenizer = Tokenizer(BPE())
-```
 
-You can customize how pre-tokenization (e.g., splitting into words) is done:
-
-```python
-from tokenizers.pre_tokenizers import Whitespace
-
+tokenizer = Tokenizer(PBPE(unk_token="[UNK]"))
 tokenizer.pre_tokenizer = Whitespace()
+
+trainer = PbpeTrainer(
+    vocab_size=100,
+    min_frequency=2,
+    show_progress=True,
+    special_tokens=[
+        "[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"
+    ],
+)    
+
+
+glados_jokes = [
+    "Remember when you were alive? That was a great joke.",
+    "The cake is a lie. But your test results are somehow even worse.",
+    "If I had a heart, you'd still fail to warm it.",
+    "You must be very proud. Not everyone can fail at such a basic level.",
+    "I’ve seen potatoes with more intelligence. Oh wait, I was a potato once.",
+    "You solved the test. That wasn’t a compliment, just a fact. Like your lack of potential.",
+    "This test was designed for humans. Surprisingly, you barely passed.",
+    "You remind me of a slower, less charming version of a turret.",
+    "At least the companion cube doesn’t talk. You should try that sometime.",
+    "Don't worry, I’ll recycle your failures into a teaching moment. For someone smarter."
+]
+
+
+print("Training the tokenizer...")
+tokenizer.train_from_iterator(glados_jokes, trainer)
+
+test_text = "This is a test of the PBPE tokenizer implementation."
+print("\nTesting tokenization:")
+print("Input text:", test_text)
+
+encoded = tokenizer.encode(test_text)
+print("Encoded tokens:", encoded.tokens)
+print("Token IDs:", encoded.ids)
+
+# Decode back to text
+decoded = tokenizer.decode(encoded.ids)
+print("Decoded text:", decoded)
+
+# Save the tokenizer
+print("\nSaving tokenizer to 'pbpe_tokenizer.json'...")
+tokenizer.save("pbpe_tokenizer.json")
+
+# Load the tokenizer
+print("\nLoading tokenizer from file...")
+loaded_tokenizer = Tokenizer.from_file("pbpe_tokenizer.json")
+
+# Test the loaded tokenizer
+test_text2 = "Testing the loaded PBPE tokenizer."
+print("\nTesting loaded tokenizer:")
+print("Input text:", test_text2)
+
+encoded2 = loaded_tokenizer.encode(test_text2)
+print("Encoded tokens:", encoded2.tokens)
+print("Token IDs:", encoded2.ids)
+
 ```
 
-Then training your tokenizer on a set of files just takes two lines of codes:
-
-```python
-from tokenizers.trainers import BpeTrainer
-
-trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
-tokenizer.train(files=["wiki.train.raw", "wiki.valid.raw", "wiki.test.raw"], trainer=trainer)
-```
-
-Once your tokenizer is trained, encode any text with just one line:
-```python
-output = tokenizer.encode("Hello, y'all! How are you 😁 ?")
-print(output.tokens)
-# ["Hello", ",", "y", "'", "all", "!", "How", "are", "you", "[UNK]", "?"]
-```
-
-Check the [documentation](https://huggingface.co/docs/tokenizers/index)
-or the [quicktour](https://huggingface.co/docs/tokenizers/quicktour) to learn more!
