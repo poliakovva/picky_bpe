@@ -2,7 +2,7 @@
 name = "pbpe_tokenizer"
 version = "0.20.1-dev.0"
 authors = ["Vlad Polyakov <vladpolyakov@example.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 name = "pbpe_tokenizer"
